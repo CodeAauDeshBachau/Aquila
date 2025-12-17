@@ -57,10 +57,9 @@ export default function LandslideMonitoring() {
   const initializeMap = (): void => {
     if (mapRef.current && !mapInstanceRef.current && window.L) {
       const L = window.L;
-      const map = L.map(mapRef.current).setView(location.coords, 10);
+      const map = L.map(mapRef.current, { attributionControl: false }).setView(location.coords, 10);
 
       L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        attribution: '© OpenStreetMap contributors',
         maxZoom: 19
       }).addTo(map);
 
@@ -162,7 +161,7 @@ export default function LandslideMonitoring() {
               </div>
               <div className="min-w-0">
                 <h1 className="text-xl font-semibold text-gray-900 truncate">
-                  Landslide Monitoring : {location.name}
+                  Landslide / Flood Monitoring : {location.name}
                 </h1>
                 <p className="text-sm text-gray-500 truncate">
                   Monitoring zone around {location.coords[0]}, {location.coords[1]}
@@ -219,31 +218,6 @@ export default function LandslideMonitoring() {
                       className="bg-green-600 hover:bg-green-700 hover:cursor-pointer text-white px-6 py-2 rounded-md text-sm font-medium transition-colors"
                     >
                       Apply
-                    </button>
-                  </div>
-                </div>
-
-                {/* Quick Examples */}
-                <div className="border-l border-gray-200 pl-6">
-                  <p className="text-xs font-medium text-gray-600 mb-2">Quick Examples:</p>
-                  <div className="flex gap-2">
-                    <button
-                      onClick={() => handleQuickLocation('Kathmandu', [27.7172, 85.3240])}
-                      className="text-xs text-blue-600 hover:text-blue-800 hover:bg-blue-50 px-3 py-1 rounded transition-colors border border-blue-200"
-                    >
-                      Kathmandu
-                    </button>
-                    <button
-                      onClick={() => handleQuickLocation('Pokhara', [28.2096, 83.9856])}
-                      className="text-xs text-blue-600 hover:text-blue-800 hover:bg-blue-50 px-3 py-1 rounded transition-colors border border-blue-200"
-                    >
-                      Pokhara
-                    </button>
-                    <button
-                      onClick={() => handleQuickLocation('Chitwan', [27.5291, 84.3542])}
-                      className="text-xs text-blue-600 hover:text-blue-800 hover:bg-blue-50 px-3 py-1 rounded transition-colors border border-blue-200"
-                    >
-                      Chitwan
                     </button>
                   </div>
                 </div>
