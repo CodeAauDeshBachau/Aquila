@@ -201,7 +201,7 @@ final_dataset_row = {**static_features, **rain_features}
 
 print(final_dataset_row)
 
-def get_flood_prediction(input_data, bundle_path='flood_model_bundle_V2.pkl', threshold=0.5):
+def get_flood_prediction(input_data, bundle_path='flood_model_bundle_V2.pkl', threshold=0.5):  #threshold = 0.436 or 0.596
     """
     Predicts flood probability for a single data point.
     
