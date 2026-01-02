@@ -11,6 +11,10 @@ import lightgbm as lgb
 
 # ee.Authenticate()
 ee.Initialize(project='aquila-478516')
+lat = 26.14
+lon = 85.36
+date_str = "2023-08-15"
+API_KEY = "Q43UBJ8WX4NNE7KJGVAKBZ5FU"
 
 def get_point_flood_features(lat, lon, date_str):
     """
@@ -187,10 +191,7 @@ def get_visual_crossing_rainfall(lat, lon, date_str, api_key):
 # rainfall_data = get_visual_crossing_rainfall(26.14, 85.36, "2023-08-15", API_KEY)
 # print(rainfall_data)
 
-lat = 26.14
-lon = 85.36
-date_str = "2023-08-15"
-API_KEY = "Q43UBJ8WX4NNE7KJGVAKBZ5FU"
+
 
 static_features = get_point_flood_features(lat, lon, date_str)
 rain_features = get_visual_crossing_rainfall(lat, lon, date_str, API_KEY)
