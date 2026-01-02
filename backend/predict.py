@@ -8,8 +8,8 @@ import lightgbm as lgb
 # Initialize Earth Engine
 # ee.Initialize()
 # ee.Reset()
-
-# ee.Authenticate()
+# authenticate for the first time, then auunticationg code should be commented
+# ee.Authenticate() 
 ee.Initialize(project='aquila-478516')
 lat = 26.14
 lon = 85.36
@@ -193,13 +193,13 @@ def get_visual_crossing_rainfall(lat, lon, date_str, api_key):
 
 
 
-static_features = get_point_flood_features(lat, lon, date_str)
-rain_features = get_visual_crossing_rainfall(lat, lon, date_str, API_KEY)
+# static_features = get_point_flood_features(lat, lon, date_str)
+# rain_features = get_visual_crossing_rainfall(lat, lon, date_str, API_KEY)
 
-# Combine them into one record
-final_dataset_row = {**static_features, **rain_features}
+# # Combine them into one record
+# final_dataset_row = {**static_features, **rain_features}
 
-print(final_dataset_row)
+# print(final_dataset_row)
 
 def get_flood_prediction(input_data, bundle_path='flood_model_bundle_V2.pkl', threshold=0.5):  #threshold = 0.436 or 0.596
     """
@@ -311,5 +311,14 @@ def get_flood_prediction(input_data, bundle_path='flood_model_bundle_V2.pkl', th
     }
     
     
-result = get_flood_prediction(final_dataset_row)
-print(result)
+# result = get_flood_prediction(final_dataset_row)
+# print(result)
+
+def full_pipeline(lat,long,date_str):
+    static_features = get_point_flood_features(lat, lon, date_str)
+    rain_features = get_visual_crossing_rainfall(lat, lon, date_str, API_KEY)
+    
+    # Combine them into one record
+    final_dataset_row = {**static_features, **rain_features}
+    result = get_flood_prediction(final_dataset_row)
+    return result
