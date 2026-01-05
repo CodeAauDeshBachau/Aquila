@@ -1,0 +1,412 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Flood Detection Image Viewer</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+        }
+        
+        .container {
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            padding: 40px;
+            max-width: 600px;
+            width: 100%;
+        }
+        
+        h1 {
+            color: #333;
+            margin-bottom: 30px;
+            text-align: center;
+            font-size: 28px;
+        }
+        
+        .form-group {
+            margin-bottom: 20px;
+        }
+        
+        label {
+            display: block;
+            margin-bottom: 8px;
+            color: #555;
+            font-weight: 600;
+            font-size: 14px;
+        }
+        
+        .input-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 15px;
+        }
+        
+        input {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #e0e0e0;
+            border-radius: 6px;
+            font-size: 14px;
+            transition: border-color 0.3s;
+        }
+        
+        input:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+        
+        button {
+            width: 100%;
+            padding: 14px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 6px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: transform 0.2s, box-shadow 0.2s;
+            margin-bottom: 20px;
+        }
+        
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 20px rgba(102, 126, 234, 0.3);
+        }
+        
+        button:active {
+            transform: translateY(0);
+        }
+        
+        .image-container {
+            text-align: center;
+            margin-top: 30px;
+            padding-top: 30px;
+            border-top: 2px solid #f0f0f0;
+        }
+        
+        .image-container img {
+            width: 256px;
+            height: 256px;
+            border: 3px solid #667eea;
+            border-radius: 8px;
+            display: none;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+        }
+        
+        .image-container img.visible {
+            display: inline-block;
+        }
+        
+        .info-box {
+            background: #f5f5f5;
+            padding: 15px;
+            border-radius: 6px;
+            margin-top: 20px;
+            display: none;
+            border-left: 4px solid #667eea;
+        }
+        
+        .info-box.visible {
+            display: block;
+        }
+        
+        .info-box p {
+            color: #666;
+            font-size: 14px;
+            margin-bottom: 8px;
+        }
+        
+        .info-box p:last-child {
+            margin-bottom: 0;
+        }
+        
+        .status {
+            margin-top: 20px;
+            padding: 15px;
+            border-radius: 6px;
+            display: none;
+            font-weight: 600;
+            text-align: center;
+        }
+        
+        .status.visible {
+            display: block;
+        }
+        
+        .status.success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        
+        .status.error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        
+        .loading {
+            text-align: center;
+            color: #667eea;
+            font-weight: 600;
+            display: none;
+        }
+        
+        .loading.visible {
+            display: block;
+        }
+        
+        .spinner {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #667eea;
+            border-radius: 50%;
+            width: 30px;
+            height: 30px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 10px;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        .legend {
+            background: #f9f9f9;
+            padding: 15px;
+            border-radius: 6px;
+            margin-top: 20px;
+            font-size: 13px;
+            border: 1px solid #e0e0e0;
+        }
+        
+        .legend-item {
+            display: flex;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+        
+        .legend-item:last-child {
+            margin-bottom: 0;
+        }
+        
+        .legend-color {
+            width: 20px;
+            height: 20px;
+            border-radius: 3px;
+            margin-right: 10px;
+            border: 1px solid #999;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🌊 Flood Detection Viewer</h1>
+        
+        <div class="form-group">
+            <label for="latitude">Latitude</label>
+            <input 
+                type="number" 
+                id="latitude" 
+                placeholder="e.g., 30.5" 
+                step="0.01"
+                min="-90"
+                max="90"
+                value="30.5"
+            >
+        </div>
+        
+        <div class="form-group">
+            <label for="longitude">Longitude</label>
+            <input 
+                type="number" 
+                id="longitude" 
+                placeholder="e.g., -95.5" 
+                step="0.01"
+                min="-180"
+                max="180"
+                value="-95.5"
+            >
+        </div>
+        
+        <div class="form-group">
+            <label for="targetDate">Target Date (Optional)</label>
+            <input 
+                type="date" 
+                id="targetDate" 
+                placeholder="Leave empty for latest"
+            >
+            <small style="color: #999; display: block; margin-top: 5px;">Leave empty to fetch the latest available SAR image</small>
+        </div>
+        
+        <button onclick="detectFlood()">Detect Flood</button>
+        
+        <div class="loading" id="loading">
+            <div class="spinner"></div>
+            Processing...
+        </div>
+        
+        <div class="status" id="status"></div>
+        
+        <div class="image-container">
+            <img id="floodImage" alt="Flood Detection Result">
+        </div>
+        
+        <div class="info-box" id="infoBox">
+            <p><strong>Flood Status:</strong> <span id="floodStatus">-</span></p>
+            <p><strong>Image Size:</strong> 256 × 256 pixels</p>
+            <p><strong>Date Selection:</strong> <span id="dateReason">-</span></p>
+        </div>
+        
+        <div class="legend">
+            <strong>Image Legend:</strong>
+            <div class="legend-item">
+                <div class="legend-color" style="background: #808080;"></div>
+                <span>Gray: SAR Background</span>
+            </div>
+            <div class="legend-item">
+                <div class="legend-color" style="background: #0064C8;"></div>
+                <span>Blue: Permanent Water</span>
+            </div>
+            <div class="legend-item">
+                <div class="legend-color" style="background: #C83232;"></div>
+                <span>Red: Detected Flood</span>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        async function detectFlood() {
+            const latitude = parseFloat(document.getElementById('latitude').value);
+            const longitude = parseFloat(document.getElementById('longitude').value);
+            const targetDate = document.getElementById('targetDate').value;
+            
+            // Validate inputs
+            if (isNaN(latitude) || isNaN(longitude)) {
+                showStatus('Please enter valid coordinates', 'error');
+                return;
+            }
+            
+            if (latitude < -90 || latitude > 90) {
+                showStatus('Latitude must be between -90 and 90', 'error');
+                return;
+            }
+            
+            if (longitude < -180 || longitude > 180) {
+                showStatus('Longitude must be between -180 and 180', 'error');
+                return;
+            }
+            
+            // Show loading state
+            document.getElementById('loading').classList.add('visible');
+            document.getElementById('status').classList.remove('visible');
+            document.getElementById('floodImage').classList.remove('visible');
+            document.getElementById('infoBox').classList.remove('visible');
+            
+            try {
+                // Build URL with optional date parameter
+                let url = `http://localhost:8000/flood/detect/${latitude}/${longitude}`;
+                if (targetDate) {
+                    url += `?target_date=${targetDate}`;
+                }
+                console.log('Calling API:', url);
+                
+                const response = await fetch(url, {
+                    method: 'GET',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    }
+                });
+                
+                console.log('Response status:', response.status);
+                
+                if (!response.ok) {
+                    const error = await response.text();
+                    console.error('API error:', error);
+                    throw new Error(`API Error: ${response.status} - ${error}`);
+                }
+                
+                const data = await response.json();
+                console.log('Response data:', data);
+                
+                // Hide loading
+                document.getElementById('loading').classList.remove('visible');
+                
+                if (!data.success) {
+                    showStatus(data.message || 'Error detecting flood', 'error');
+                    return;
+                }
+                
+                // Display image
+                if (data.image) {
+                    console.log('Displaying image...');
+                    const img = document.getElementById('floodImage');
+                    img.src = `data:image/png;base64,${data.image}`;
+                    img.onload = () => {
+                        console.log('Image loaded successfully');
+                    };
+                    img.onerror = (e) => {
+                        console.error('Image failed to load:', e);
+                        showStatus('Error loading image', 'error');
+                    };
+                    img.classList.add('visible');
+                }
+                
+                // Show info
+                const floodStatus = data.flood_detected ? '🔴 FLOOD DETECTED' : '✅ NO FLOOD';
+                document.getElementById('floodStatus').textContent = floodStatus;
+                
+                // Display date selection reason
+                if (data.date_selection_reason) {
+                    document.getElementById('dateReason').textContent = data.date_selection_reason;
+                }
+                
+                document.getElementById('infoBox').classList.add('visible');
+                
+                // Show success message
+                showStatus(data.message || 'Detection completed', 'success');
+                
+            } catch (error) {
+                document.getElementById('loading').classList.remove('visible');
+                console.error('Full error:', error);
+                showStatus(`Error: ${error.message}`, 'error');
+            }
+        }
+        
+        function showStatus(message, type) {
+            const statusEl = document.getElementById('status');
+            statusEl.textContent = message;
+            statusEl.className = `status visible ${type}`;
+        }
+        
+        // Allow Enter key to trigger detection
+        document.getElementById('latitude').addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') detectFlood();
+        });
+        document.getElementById('longitude').addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') detectFlood();
+        });
+        document.getElementById('targetDate').addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') detectFlood();
+        });
+        
+        // Log on page load
+        console.log('Page loaded. API endpoint: http://localhost:8000/flood/detect/');
+    </script>
+</body>
+</html>
