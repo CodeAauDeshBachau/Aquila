@@ -1,11 +1,12 @@
 import numpy as np
 import torch
 from torchvision import transforms
-from typing import Optional
+from typing import Optional, Dict
 import base64
 import io
 from PIL import Image
 from .config import get_settings
+
 
 class FloodModelService:
     """Service for flood detection model inference."""
@@ -37,17 +38,32 @@ class FloodModelService:
         self.model.eval()
         self._model_loaded = True
     
-    def predict(self, s1_image: np.ndarray, jrc_water: Optional[np.ndarray] = None) -> tuple:
+    def predict(
+        self, 
+        s1_image: np.ndarray, 
+        esa_water_large: Optional[np.ndarray] = None,
+        esa_service = None
+    ) -> tuple:
         """
-        Run flood detection and return (flood_detected, pixel_intensity_array).
+        Run flood detection and return (flood_detected, images_dict).
         
         Args:
             s1_image: SAR image (H, W, 2) with VV/VH bands
-            jrc_water: Optional JRC permanent water mask (H, W)
+            esa_water_large: ESA WorldCover large water mask (384x384+) for alignment
+            esa_service: ESAWorldCoverService instance for alignment
+            
+        Returns:
+            tuple: (flood_detected: bool, images: Dict[str, str])
+                   where images contains base64 encoded PNGs:
+                   - 'sar': Pure SAR grayscale
+                   - 'permanent_water': Permanent water (blue) on SAR
+                   - 'model_water': Model water detection (red) on SAR
+                   - 'classification': Classification map on SAR
+                   - 'flood_only': New flood only (red) on SAR
         """
         self._load_model()
         
-        # Preprocess
+        # Preprocess SAR
         vv = torch.from_numpy(s1_image[:, :, 0]).float()
         vh = torch.from_numpy(s1_image[:, :, 1]).float()
         
@@ -75,11 +91,26 @@ class FloodModelService:
             output = self.model(img_input)
             prediction = torch.argmax(output, dim=1).squeeze().cpu().numpy()
         
-        # Get permanent water mask (prefer JRC, fallback to model class 1)
-        if jrc_water is not None:
-            perm_water = (jrc_water[:, :, 0] if jrc_water.ndim == 3 else jrc_water) > 0
+        # Get permanent water mask using ESA WorldCover with alignment
+        if esa_water_large is not None and esa_service is not None:
+            # Use alignment from Colab
+            perm_water = esa_service.align_and_crop_permanent_water(
+                vv_norm.numpy(), 
+                esa_water_large
+            )
+            
+            # Correct model prediction with aligned permanent water
+            prediction_corrected = prediction.copy()
+            prediction_corrected[perm_water == 1] = 1
+            prediction = prediction_corrected
+            
+            perm_water = (perm_water > 0).astype(bool)
         else:
+            # Fallback to model class 1
             perm_water = (prediction == 1)
+        
+        # Model water = classes 1 (water) + 2 (flood) before correction
+        model_water_mask = (prediction == 1) | (prediction == 2)
         
         # Flood = model class 2, excluding permanent water
         flood_mask = (prediction == 2) & (~perm_water)
@@ -92,10 +123,16 @@ class FloodModelService:
         # Analyze flood extent
         self.analyze_flood_extent(flood_pixels, water_pixels)
         
-        # Generate colored overlay image
-        pixel_intensity = self._create_grayscale_image(vv_norm.numpy(), flood_mask, perm_water)
+        # Generate all 5 images like Colab
+        images = self._create_five_panel_images(
+            vv_norm.numpy(), 
+            perm_water, 
+            model_water_mask,
+            prediction, 
+            flood_mask
+        )
         
-        return flood_detected, pixel_intensity
+        return flood_detected, images
     
     def _is_flood_detected(self, flood_pixels: int, water_pixels: int) -> bool:
         """
@@ -165,17 +202,25 @@ class FloodModelService:
         
         return analysis
     
-    def _create_grayscale_image(self, vv_norm: np.ndarray, flood_mask: np.ndarray, perm_water: np.ndarray) -> str:
+    def _create_five_panel_images(
+        self, 
+        vv_norm: np.ndarray, 
+        perm_water: np.ndarray,
+        model_water: np.ndarray,
+        prediction: np.ndarray, 
+        flood_mask: np.ndarray
+    ) -> Dict[str, str]:
         """
-        Create RGB image with colored overlays on SAR background.
-        - SAR background as grayscale
-        - Red overlay for detected floods
-        - Blue overlay for permanent water (on top)
+        Create 5 separate images matching Colab output:
+        A: Pure SAR (grayscale)
+        B: Permanent Water (blue) overlaid on SAR
+        C: Model Water Detection (red) overlaid on SAR
+        D: Classification Map (blue=water, red=flood) overlaid on SAR
+        E: New Flood Only (red) overlaid on SAR
         
-        Returns base64 encoded PNG image string.
+        Returns dict with base64 encoded PNG images.
         """
         # Apply contrast stretching to SAR data for better visibility
-        # Normalize to 0-1 range based on actual min/max in the data
         vv_min = np.percentile(vv_norm, 2)  # Use 2nd percentile to handle outliers
         vv_max = np.percentile(vv_norm, 98)
         
@@ -190,23 +235,44 @@ class FloodModelService:
         print(f"DEBUG: SAR intensity range after stretch: [{sar_intensity.min()}, {sar_intensity.max()}]")
         print(f"DEBUG: Flood pixels: {flood_mask.sum()}, Water pixels: {perm_water.sum()}")
         
-        # Create RGB image starting with grayscale SAR
-        height, width = vv_norm.shape
-        rgb_image = np.stack([sar_intensity, sar_intensity, sar_intensity], axis=2)
+        images = {}
         
-        # Add red overlay for flood areas
-        rgb_image[flood_mask] = [200, 50, 50]  # Red color (R, G, B)
+        # ============ IMAGE A: Pure SAR ============
+        img_a = np.stack([sar_intensity, sar_intensity, sar_intensity], axis=2)
+        images['sar'] = self._numpy_to_base64(img_a)
         
-        # Add blue overlay for permanent water ON TOP (drawn last so it's visible)
-        rgb_image[perm_water] = [0, 100, 200]  # Blue color (R, G, B)
+        # ============ IMAGE B: Permanent Water (BLUE) on SAR ============
+        img_b = np.stack([sar_intensity, sar_intensity, sar_intensity], axis=2).copy()
+        # Blue overlay for permanent water
+        img_b[perm_water] = [0, 100, 200]  # Blue (R, G, B)
+        images['permanent_water'] = self._numpy_to_base64(img_b)
         
-        # Convert to PIL Image (RGB mode)
-        pil_image = Image.fromarray(rgb_image.astype(np.uint8), mode='RGB')
+        # ============ IMAGE C: Model Water Detection (RED) on SAR ============
+        img_c = np.stack([sar_intensity, sar_intensity, sar_intensity], axis=2).copy()
+        # Red overlay for model water detection
+        img_c[model_water] = [200, 50, 50]  # Red (R, G, B)
+        images['model_water'] = self._numpy_to_base64(img_c)
         
-        # Save to bytes buffer as PNG
+        # ============ IMAGE D: Classification Map on SAR ============
+        img_d = np.stack([sar_intensity, sar_intensity, sar_intensity], axis=2).copy()
+        # Blue for permanent water (class 1)
+        img_d[prediction == 1] = [0, 100, 200]  # Blue
+        # Red for flood (class 2)
+        img_d[prediction == 2] = [200, 50, 50]  # Red
+        images['classification'] = self._numpy_to_base64(img_d)
+        
+        # ============ IMAGE E: New Flood Only (RED) on SAR ============
+        img_e = np.stack([sar_intensity, sar_intensity, sar_intensity], axis=2).copy()
+        # Red overlay for new flood only
+        img_e[flood_mask] = [200, 50, 50]  # Red (R, G, B)
+        images['flood_only'] = self._numpy_to_base64(img_e)
+        
+        return images
+    
+    def _numpy_to_base64(self, img_array: np.ndarray) -> str:
+        """Convert numpy array to base64 encoded PNG string."""
+        pil_image = Image.fromarray(img_array.astype(np.uint8), mode='RGB')
         buf = io.BytesIO()
         pil_image.save(buf, format='PNG')
         buf.seek(0)
-        
-        # Encode to base64
         return base64.b64encode(buf.read()).decode('utf-8')
