@@ -4,6 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Flood Detection Image Viewer</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" />
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
     <style>
         * {
             margin: 0;
@@ -232,6 +234,27 @@
             margin-right: 10px;
             border: 1px solid #999;
         }
+        
+        .map-container {
+            margin-top: 20px;
+            border-radius: 8px;
+            overflow: hidden;
+            border: 2px solid #e0e0e0;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+        }
+        
+        #map {
+            height: 400px;
+            width: 100%;
+        }
+        
+        .map-info {
+            background: #e3f2fd;
+            padding: 10px 15px;
+            font-size: 13px;
+            color: #1976d2;
+            border-top: 1px solid #90caf9;
+        }
     </style>
 </head>
 <body>
@@ -276,6 +299,11 @@
         </div>
         
         <button onclick="detectFlood()">🔍 Detect Flood</button>
+        
+        <div class="map-container">
+            <div id="map"></div>
+            <div class="map-info">💡 Click on the map to automatically fill in coordinates</div>
+        </div>
         
         <div class="loading" id="loading">
             <div class="spinner"></div>
@@ -335,6 +363,66 @@
     </div>
 
     <script>
+        // Initialize map
+        let map, marker;
+        
+        function initializeMap() {
+            // Create map centered on default coordinates
+            const defaultLat = 27.709454;
+            const defaultLng = 84.423296;
+            
+            map = L.map('map').setView([defaultLat, defaultLng], 7);
+            
+            // Add tile layer (OpenStreetMap)
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                attribution: '© OpenStreetMap contributors',
+                maxZoom: 19
+            }).addTo(map);
+            
+            // Add default marker
+            marker = L.marker([defaultLat, defaultLng], {
+                draggable: true
+            }).addTo(map).bindPopup('Click to update coordinates');
+            
+            // Update coordinates when marker is dragged
+            marker.on('dragend', function() {
+                const lat = marker.getLatLng().lat;
+                const lng = marker.getLatLng().lng;
+                document.getElementById('latitude').value = lat.toFixed(6);
+                document.getElementById('longitude').value = lng.toFixed(6);
+            });
+            
+            // Click on map to place marker
+            map.on('click', function(e) {
+                const lat = e.latlng.lat;
+                const lng = e.latlng.lng;
+                
+                // Update marker position
+                marker.setLatLng([lat, lng]);
+                
+                // Update input fields
+                document.getElementById('latitude').value = lat.toFixed(6);
+                document.getElementById('longitude').value = lng.toFixed(6);
+            });
+            
+            // Update marker when lat/long inputs change
+            document.getElementById('latitude').addEventListener('change', updateMapFromInputs);
+            document.getElementById('longitude').addEventListener('change', updateMapFromInputs);
+        }
+        
+        function updateMapFromInputs() {
+            const lat = parseFloat(document.getElementById('latitude').value);
+            const lng = parseFloat(document.getElementById('longitude').value);
+            
+            if (!isNaN(lat) && !isNaN(lng) && lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180) {
+                marker.setLatLng([lat, lng]);
+                map.setView([lat, lng], 7);
+            }
+        }
+        
+        // Initialize map after page loads
+        window.addEventListener('load', initializeMap);
+        
         async function detectFlood() {
             const latitude = parseFloat(document.getElementById('latitude').value);
             const longitude = parseFloat(document.getElementById('longitude').value);

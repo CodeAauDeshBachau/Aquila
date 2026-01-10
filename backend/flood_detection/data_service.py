@@ -98,12 +98,12 @@ class SentinelDataService:
         else:
             # Default: fetch latest from past sar_buffer_days (Sentinel-1 revisit time)
             end_date = today.isoformat()
-            start_date = (today - datetime.timedelta(days=sar_buffer_days)).isoformat()
+            start_date = (today - datetime.timedelta(days=30)).isoformat()
             search_mode = "latest"
-            search_description = f"latest from past {sar_buffer_days} days"
+            search_description = f"latest from past 30 days"
             
             print("📅 Mode: ORIGINAL (No date specified)")
-            print(f"   Using last {sar_buffer_days} days: {start_date} to {end_date}")
+            print(f"   Using last 30 days: {start_date} to {end_date}")
         
         # Evalscript for VV and VH bands
         evalscript = """
@@ -258,23 +258,60 @@ class ESAWorldCoverService:
     
     def align_and_crop_permanent_water(self, sar_vv: np.ndarray, perm_water_large: np.ndarray) -> np.ndarray:
         """
-        Align ESA WorldCover to SAR using phase correlation + feature matching, then crop to 256x256.
-        
-        Parameters:
-        -----------
-        sar_vv : np.ndarray
-            SAR VV band (256x256) normalized to 0-1
-        perm_water_large : np.ndarray
-            Large ESA WorldCover water mask (384x384 or larger)
-        
-        Returns:
-        --------
-        np.ndarray: Aligned and cropped permanent water mask (256x256)
+        Align ESA WorldCover to SAR with special handling for narrow mountain rivers.
         """
         print("\n🔧 ALIGNING AND CROPPING PERMANENT WATER...")
         
+        # Detect river type based on water characteristics
+        water_pixels = np.sum(perm_water_large > 0)
+        total_pixels = perm_water_large.size
+        water_percentage = (water_pixels / total_pixels) * 100
+        
+        # Calculate water shape characteristics
+        if water_pixels > 0:
+            # Count separate water bodies
+            from scipy.ndimage import label
+            labeled, num_features = label(perm_water_large > 0)
+            
+            # Calculate average water body size
+            avg_cluster_size = water_pixels / max(num_features, 1)
+            
+            print(f"   Water coverage: {water_percentage:.2f}%")
+            print(f"   Water clusters: {num_features}")
+            print(f"   Avg cluster size: {avg_cluster_size:.0f} pixels")
+            
+            # Determine river type
+            is_narrow_river = (water_percentage < 5.0 and avg_cluster_size < 5000)
+            is_mountain_river = (num_features <= 3 and water_percentage < 3.0)
+            
+            if is_mountain_river:
+                print(f"   → Detected: NARROW MOUNTAIN RIVER")
+                # Use gentler alignment for narrow rivers
+                upsample = 5
+                orb_nfeatures = 300
+                ransac_thresh = 15.0
+                lowe_ratio = 0.8  # More permissive
+            elif is_narrow_river:
+                print(f"   → Detected: NARROW RIVER")
+                upsample = 10
+                orb_nfeatures = 400
+                ransac_thresh = 10.0
+                lowe_ratio = 0.75
+            else:
+                print(f"   → Detected: WIDE/BRAIDED RIVER")
+                # Original parameters
+                upsample = 20
+                orb_nfeatures = 500
+                ransac_thresh = 5.0
+                lowe_ratio = 0.7
+        else:
+            print(f"   → No water detected, using default parameters")
+            upsample = 20
+            orb_nfeatures = 500
+            ransac_thresh = 5.0
+            lowe_ratio = 0.7
+        
         sar_gray = (sar_vv * 255).astype(np.uint8)
-        perm_large_gray = (perm_water_large * 255).astype(np.uint8)
         
         print("   Step 1/3: Phase correlation alignment...")
         
@@ -295,25 +332,41 @@ class ESAWorldCoverService:
         try:
             shift, error, diffphase = phase_cross_correlation(
                 sar_binary, perm_center, 
-                upsample_factor=20,
+                upsample_factor=upsample,  # ADAPTIVE
                 normalization=None
             )
             
+            confidence = 1 - error
             print(f"      Detected shift: Y={shift[0]:.3f}, X={shift[1]:.3f} pixels")
-            print(f"      Correlation confidence: {1-error:.4f}")
+            print(f"      Correlation confidence: {confidence:.4f}")
             
-            perm_shifted = nd_shift(
-                perm_water_large.astype(np.float32), 
-                shift, 
-                order=3, 
-                mode='constant', 
-                cval=0
-            )
+            # For narrow rivers, be more conservative about applying shift
+            if is_mountain_river or is_narrow_river:
+                if confidence > 0.4 and abs(shift[0]) < 30 and abs(shift[1]) < 30:
+                    perm_shifted = nd_shift(
+                        perm_water_large.astype(np.float32), 
+                        shift, 
+                        order=1,  # Linear for narrow rivers (more stable)
+                        mode='constant', 
+                        cval=0
+                    )
+                    print(f"      ✓ Conservative shift applied")
+                else:
+                    print(f"      ⚠️ Shift rejected (confidence {confidence:.3f} or large shift)")
+                    perm_shifted = perm_water_large.astype(np.float32)
+            else:
+                # Wide rivers: use original aggressive shift
+                perm_shifted = nd_shift(
+                    perm_water_large.astype(np.float32), 
+                    shift, 
+                    order=3, 
+                    mode='constant', 
+                    cval=0
+                )
             
         except Exception as e:
-            print(f"      ⚠ Phase correlation failed: {e}, using original")
+            print(f"      ⚠️ Phase correlation failed: {e}, using original")
             perm_shifted = perm_water_large.astype(np.float32)
-            shift = (0, 0)
         
         print("   Step 2/3: Feature-based refinement...")
         
@@ -325,7 +378,11 @@ class ESAWorldCoverService:
         perm_resized_gray = (perm_resized * 255).astype(np.uint8)
         
         try:
-            orb = cv2.ORB_create(nfeatures=500, scaleFactor=1.2, nlevels=8)
+            orb = cv2.ORB_create(
+                nfeatures=orb_nfeatures,  # ADAPTIVE
+                scaleFactor=1.2, 
+                nlevels=8
+            )
             
             kp1, des1 = orb.detectAndCompute(sar_gray, None)
             kp2, des2 = orb.detectAndCompute(perm_resized_gray, None)
@@ -338,12 +395,15 @@ class ESAWorldCoverService:
                 for pair in matches:
                     if len(pair) == 2:
                         m, n = pair
-                        if m.distance < 0.7 * n.distance:
+                        if m.distance < lowe_ratio * n.distance:  # ADAPTIVE
                             good_matches.append(m)
                 
                 print(f"      Found {len(good_matches)} good feature matches")
                 
-                if len(good_matches) > 10:
+                # For narrow rivers, require fewer matches
+                min_matches = 5 if (is_mountain_river or is_narrow_river) else 10
+                
+                if len(good_matches) >= min_matches:
                     src_pts = np.float32([kp2[m.queryIdx].pt for m in good_matches]).reshape(-1, 1, 2)
                     dst_pts = np.float32([kp1[m.trainIdx].pt for m in good_matches]).reshape(-1, 1, 2)
                     
@@ -354,26 +414,34 @@ class ESAWorldCoverService:
                         src_pts * [[scale_x, scale_y]], 
                         dst_pts * [[scale_x, scale_y]],
                         method=cv2.RANSAC,
-                        ransacReprojThreshold=5.0,
+                        ransacReprojThreshold=ransac_thresh,  # ADAPTIVE
                         confidence=0.99
                     )
                     
                     if M is not None:
-                        perm_transformed = cv2.warpAffine(
-                            perm_shifted.astype(np.float32), 
-                            M, 
-                            (w_large, h_large),
-                            flags=cv2.INTER_LINEAR,
-                            borderMode=cv2.BORDER_CONSTANT,
-                            borderValue=0
-                        )
-                        perm_shifted = perm_transformed
-                        
                         inliers = np.sum(mask)
-                        print(f"      Applied affine transform (inliers: {inliers}/{len(good_matches)})")
+                        inlier_ratio = inliers / len(good_matches)
                         
+                        # For narrow rivers, require higher inlier ratio
+                        min_inlier_ratio = 0.5 if (is_mountain_river or is_narrow_river) else 0.3
+                        
+                        if inlier_ratio >= min_inlier_ratio:
+                            perm_transformed = cv2.warpAffine(
+                                perm_shifted.astype(np.float32), 
+                                M, 
+                                (w_large, h_large),
+                                flags=cv2.INTER_LINEAR,
+                                borderMode=cv2.BORDER_CONSTANT,
+                                borderValue=0
+                            )
+                            perm_shifted = perm_transformed
+                            
+                            print(f"      Applied affine transform (inliers: {inliers}/{len(good_matches)}, ratio: {inlier_ratio:.2f})")
+                        else:
+                            print(f"      ⚠️ Affine rejected (inlier ratio {inlier_ratio:.2f} < {min_inlier_ratio})")
+                            
         except Exception as e:
-            print(f"      ⚠ Feature matching failed: {e}")
+            print(f"      ⚠️ Feature matching failed: {e}")
         
         print("   Step 3/3: Cropping to exact 256x256...")
         
@@ -387,7 +455,7 @@ class ESAWorldCoverService:
         end_x = start_x + 256
         
         if start_y < 0 or start_x < 0 or end_y > h_large or end_x > w_large:
-            print(f"      ⚠ Cropping out of bounds, adjusting...")
+            print(f"      ⚠️ Cropping out of bounds, adjusting...")
             start_y = max(0, min(start_y, h_large - 256))
             start_x = max(0, min(start_x, w_large - 256))
             end_y = start_y + 256
@@ -396,7 +464,7 @@ class ESAWorldCoverService:
         perm_cropped = perm_shifted[start_y:end_y, start_x:end_x]
         
         if perm_cropped.shape != (256, 256):
-            print(f"      ⚠ Shape mismatch {perm_cropped.shape}, resizing...")
+            print(f"      ⚠️ Shape mismatch {perm_cropped.shape}, resizing...")
             perm_cropped = cv2.resize(
                 perm_cropped, 
                 (256, 256), 
@@ -418,6 +486,9 @@ class ESAWorldCoverService:
         union = np.sum(sar_water_mask | perm_final)
         iou = intersection / (union + 1e-6)
         print(f"      Alignment IoU: {iou:.3f}")
+        
+        if iou < 0.3:
+            print(f"      ⚠️ LOW ALIGNMENT QUALITY - Model will use SAR-based water detection")
         
         return perm_final
 
